@@ -154,6 +154,10 @@ func (n *NanoServe) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				n.ErrorHandler(c, err)
 				return
 			}
+			// if user aborted, return early
+			if c.IsAborted() {
+				return
+			}
 		}
 	}
 
@@ -162,6 +166,9 @@ func (n *NanoServe) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		for _, hook := range n.Hooks.PreHandler {
 			if err := hook(c); err != nil {
 				n.ErrorHandler(c, err)
+				return
+			}
+			if c.IsAborted() {
 				return
 			}
 		}

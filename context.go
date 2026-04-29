@@ -15,8 +15,19 @@ type Context struct {
 	handlers []HandlerFunction
 	index    int
 
-	contextData map[string]interface{}
+	contextData map[string] any
 	statusCode  int
+	
+	// for aborting the Hook execution
+	is_aborted bool
+}
+
+func(c *Context) Abort(){
+	c.is_aborted = true
+}
+
+func (c *Context) IsAborted() bool {
+	return c.is_aborted
 }
 
 func (c *Context) Next() error {
@@ -42,7 +53,7 @@ func (c *Context) Set(key string, value any) {
 	c.contextData[key] = value
 }
 
-func (c *Context) Get(key string) interface{} {
+func (c *Context) Get(key string) any {
 	return c.contextData[key]
 }
 
