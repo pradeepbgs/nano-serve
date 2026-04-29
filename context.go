@@ -10,9 +10,9 @@ type Context struct {
 	Writer  http.ResponseWriter
 	Request *http.Request
 
-	params map[string]string
+	// params map[string]string
 
-	handlers []HandlerFunction
+	// handlers []HandlerFunction
 	index    int
 
 	contextData map[string] any
@@ -20,6 +20,17 @@ type Context struct {
 	
 	// for aborting the Hook execution
 	is_aborted bool
+	
+	matached_handler *RouteMatch
+}
+
+func NewContext(w http.ResponseWriter, r *http.Request, matched_handler *RouteMatch) *Context {
+	return &Context{
+		Writer:        w,
+		Request:       r,
+		statusCode:    http.StatusOK,
+		matached_handler: matched_handler,
+	}
 }
 
 func(c *Context) Abort(){
@@ -32,10 +43,20 @@ func (c *Context) IsAborted() bool {
 
 func (c *Context) Next() error {
 	c.index++
-	if c.index >= len(c.handlers) {
+	if c.index >= len(c.matached_handler.Middlewares) {
 		return nil
 	}
-	return c.handlers[c.index](c)
+	return c.matached_handler.Middlewares[c.index](c)
+}
+
+func (c *Context) RunHandler() (bool, error) {
+	if c.index == len(c.matached_handler.Middlewares) {
+		if c.matached_handler.Handler == nil {
+			return false, nil
+		}
+		return true, c.matached_handler.Handler(c)
+	}
+	return false, nil
 }
 
 func (c *Context) Status(code int) *Context {
@@ -80,7 +101,7 @@ func (c *Context) Query(key string) string {
 }
 
 func (c *Context) Param(key string) string {
-	val := c.params[key]
+	val := c.matached_handler.Params[key]
 	if val != "" {
 		return val
 	}

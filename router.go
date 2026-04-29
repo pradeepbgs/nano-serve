@@ -10,9 +10,15 @@ type Router interface {
 	AddMiddleware(path string, handlers ...HandlerFunction)
 }
 
+// type RouteMatch struct {
+// 	Handler []HandlerFunction
+// 	Params  map[string]string
+// }
+
 type RouteMatch struct {
-	Handler []HandlerFunction
-	Params  map[string]string
+	Params      map[string]string
+	Handler     HandlerFunction
+	Middlewares []HandlerFunction
 }
 
 type Node struct {
@@ -118,8 +124,8 @@ func (r *TrieRouter) Insert(method string, path string, handler HandlerFunction)
 func (r *TrieRouter) Search(method string, path string) *RouteMatch {
 	node := r.root
 	segments := strings.Split(path, "/")
-	var collected []HandlerFunction
-	collected = r.globalMiddlewares
+	var collected_miidleware []HandlerFunction
+	collected_miidleware = r.globalMiddlewares
 	copied := false
 
 	var params map[string]string
@@ -143,22 +149,26 @@ func (r *TrieRouter) Search(method string, path string) *RouteMatch {
 			node = node.children["*"]
 			break
 		} else {
-			return &RouteMatch{Params: params, Handler: collected}
+			return &RouteMatch{Params: params, Handler: nil, Middlewares: collected_miidleware}
 		}
 		if len(node.middlewares) > 0 {
 			if !copied {
-				collected = append([]HandlerFunction{}, collected...)
+				collected_miidleware = append([]HandlerFunction{}, collected_miidleware...)
+				copied = true
 			}
-			collected = append(collected, node.middlewares...)
+			collected_miidleware = append(collected_miidleware, node.middlewares...)
 		}
-	}
-	if h := node.handlers[method]; h != nil {
-		if !copied {
-			collected = append([]HandlerFunction{}, collected...)
-		}
-		collected = append(collected, h)
-		return &RouteMatch{Params: params, Handler: collected}
 	}
 
-	return &RouteMatch{Params: params, Handler: collected}
+	// if the handler found with correct method
+	if node.handlers[method] != nil {
+		return &RouteMatch{Params: params, Handler: node.handlers[method], Middlewares: collected_miidleware}
+	}
+	
+	// check for ALL method
+	if node.handlers["ALL"] != nil {
+		return &RouteMatch{Params: params, Handler: node.handlers["ALL"], Middlewares: collected_miidleware}
+	}
+	
+	return &RouteMatch{Params: params, Handler: nil, Middlewares: collected_miidleware}
 }
