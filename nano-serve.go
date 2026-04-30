@@ -5,12 +5,28 @@ import (
 )
 
 type HandlerFunction func(*Context) error
-
 type ErrorHandlerFunc func(*Context, error)
 
+type Hooks struct {
+	OnRequest  []HandlerFunction
+	PreHandler []HandlerFunction
+}
+
+type HookType string
+
+const (
+	OnRequest  HookType = "OnRequest"
+	PreHandler HookType = "PreHandler"
+	OnError    HookType = "OnError"
+)
+
 type NanoServe struct {
-	router       Router
-	ErrorHandler ErrorHandlerFunc
+	router              Router
+	ErrorHandler        ErrorHandlerFunc
+	Hooks               Hooks
+	is_on_req_hook      bool
+	is_pre_handler_hook bool
+	is_on_error_hook    bool
 }
 
 func New() *NanoServe {
@@ -62,8 +78,16 @@ func (n *NanoServe) Handle(method, path string, h ...HandlerFunction) {
 	n.addRoute(method, path, h...)
 }
 
-// for serving static files
+func (n *NanoServe) AddHooks(hook_type HookType, hooks ...HandlerFunction) {
+	switch hook_type {
+	case "OnRequest":
+		n.Hooks.OnRequest = append(n.Hooks.OnRequest, hooks...)
+	case "PreHandler":
+		n.Hooks.PreHandler = append(n.Hooks.PreHandler, hooks...)
+	}
+}	
 
+// for serving static files
 func (n *NanoServe) Static(urlPrefix string, rootDir string) {
 	fs := http.FileServer(http.Dir(rootDir))
 
@@ -90,6 +114,11 @@ func (n *NanoServe) addRoute(method string, path string, handlers ...HandlerFunc
 }
 
 func (n *NanoServe) Run(addr string) error {
+	// Check if any hooks are defined and set the corresponding flags
+	n.is_on_req_hook = len(n.Hooks.OnRequest) > 0
+	n.is_pre_handler_hook = len(n.Hooks.PreHandler) > 0
+	// n.is_on_error_hook = len(n.Hooks.OnError) > 0
+
 	return http.ListenAndServe(addr, n)
 }
 
@@ -110,18 +139,52 @@ func (n *NanoServe) Use(pathOrHandler any, handlers ...HandlerFunction) {
 func (n *NanoServe) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	match := n.router.Search(r.Method, r.URL.Path)
-	c := &Context{
-		Writer:   w,
-		Request:  r,
-		handlers: match.Handler,
-		index:    0,
-		params: match.Params,
-	}
-	if len(c.handlers) > 0 {
-		if err := c.handlers[0](c); err != nil {
-			n.ErrorHandler(c, err)
+	c := NewContext(w,r,match)
+
+	// on request hooks execution
+	if n.is_on_req_hook {
+		for _, hook := range n.Hooks.OnRequest {
+			if err := hook(c); err != nil {
+				n.ErrorHandler(c, err)
+				return
+			}
+			// if user aborted, return early
+			if c.IsAborted() {
+				return
+			}
 		}
+	}
+
+	// execute middlewares
+	// uses c.next chaining
+	if len(match.Middlewares) > 0 {
+		if err := match.Middlewares[0](c); err != nil {
+			n.ErrorHandler(c, err)
+			return
+		}
+	}
+	
+	// pre handler hook
+	if n.is_pre_handler_hook {
+		for _, hook := range n.Hooks.PreHandler {
+			if err := hook(c); err != nil {
+				n.ErrorHandler(c, err)
+				return
+			}
+			if c.IsAborted() {
+				return
+			}
+		}
+	}
+	
+	// handler execution with boolean check , if no handler is found, return 404
+	ran_hanler, err := c.RunHandler()
+	if err != nil {
+		n.ErrorHandler(c, err)
 		return
 	}
-	http.NotFound(w,r)
+	
+	if !ran_hanler {
+		http.NotFound(w, r)
+	}
 }
